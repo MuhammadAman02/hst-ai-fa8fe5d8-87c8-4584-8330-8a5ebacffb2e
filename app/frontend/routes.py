@@ -1,44 +1,53 @@
-from fastapi import Request
-from fastapi.responses import HTMLResponse
-from . import router
-from .. import templates
-import os
-from datetime import datetime
+from fastapi import APIRouter, Request
+from fastapi.templating import Jinja2Templates
+from nicegui import ui
 
-@router.get('/', response_class=HTMLResponse)
+router = APIRouter()
+templates = Jinja2Templates(directory="app/templates")
+
+@router.get("/")
 async def index(request: Request):
-    """Serves the main index page using Jinja2 templates."""
-    import logging
-    logger = logging.getLogger(__name__)
+    return templates.TemplateResponse("index.html", {"request": request})
 
-    if not templates:
-        error_msg = "Templates support is not configured. Check app/__init__.py."
-        logger.error(error_msg)
-        # Consider raising an HTTPException or returning a more structured error
-        return HTMLResponse(
-            content=f"<html><body><h1>Configuration Error</h1><p>{error_msg}</p></body></html>",
-            status_code=500
-        )
+@ui.page('/')
+def fraud_detection_ui():
+    ui.label('Irish Fraud Detection System').classes('text-h3')
+    
+    with ui.card():
+        ui.label('Enter Transaction Details').classes('text-h5')
+        transaction_id = ui.input('Transaction ID')
+        amount = ui.number('Amount (€)')
+        sender = ui.input('Sender Account')
+        recipient = ui.input('Recipient Account')
+        description = ui.input('Description')
+        ip_address = ui.input('IP Address')
+        
+        async def submit():
+            import httpx
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    'http://localhost:8000/api/detect-fraud',
+                    json={
+                        'id': transaction_id.value,
+                        'amount': amount.value,
+                        'sender': sender.value,
+                        'recipient': recipient.value,
+                        'description': description.value,
+                        'ip_address': ip_address.value
+                    }
+                )
+                result = response.json()
+                ui.notify(f"Risk Level: {result['fraud_detection_result']['risk_level']}")
+                with result_card:
+                    ui.label(f"Risk Score: {result['fraud_detection_result']['risk_score']}")
+                    ui.label(f"Risk Level: {result['fraud_detection_result']['risk_level']}")
+                    ui.label("Risk Factors:")
+                    for factor in result['fraud_detection_result']['risk_factors']:
+                        ui.label(f"- {factor}")
+        
+        ui.button('Check for Fraud', on_click=submit)
+    
+    with ui.card() as result_card:
+        ui.label('Fraud Detection Results').classes('text-h5')
 
-    try:
-        # The existence of 'templates' object implies it's configured.
-        # FastAPI/Starlette's Jinja2Templates will raise an internal error if the specific template is not found.
-        # This will be caught by the generic exception handler.
-        logger.info(f"Attempting to render index.html")
-        return templates.TemplateResponse("index.html", {
-            "request": request,
-            "current_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        })
-    except Exception as e:
-        # This will catch errors if index.html is missing or if there's a rendering error within the template itself.
-        # The generic error handler in error_handling.py should ideally log this.
-        error_msg = f"Error rendering template 'index.html': {str(e)}"
-        logger.exception(error_msg) # Log with stack trace
-        # It's often better to let the centralized error handlers deal with the response
-        # For now, returning a simple HTML error for clarity during development.
-        return HTMLResponse(
-            content=f"<html><body><h1>Application Error</h1><p>Could not render the page. Please check logs.</p></body></html>",
-            status_code=500
-        )
-
-# Add additional frontend routes here using the @router decorator
+ui.run()
